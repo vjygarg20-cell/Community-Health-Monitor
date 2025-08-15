@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holistic Community Health Monitor</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React and ReactDOM -->
+    <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    
+    <!-- Firebase SDKs with ES Module syntax -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
+        import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+
+        // Get React from the global window object
+        const { useState, useEffect, useCallback } = window.React;
+        const ReactDOM = window.ReactDOM;
+
+        // Global variables provided by the environment
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        function App() {
+          // State for user authentication and database
+          const [db, setDb] = useState(null);
+          const [auth, setAuth] = useState(null);
+          const [userId, setUserId] = useState(null);
+        
+          // State for the health records data
+          const [healthRecords, setHealthRecords] = useState([]);
+          const [filteredRecords, setFilteredRecords] = useState([]);
+          const [activeUsernames, setActiveUsernames] = useState([]);
+        
+          // State for form inputs
+          const [username, setUsername] = useState('');
+          const [systolic, setSystolic] = useState('');
+          const [diastolic, setDiastolic] = useState('');
+          const [bloodSugar, setBloodSugar] = useState('');
+          const [weight, setWeight] = useState('');
+          const [height, setHeight] = useState('');
+          const [bmi, setBmi] = useState('');
+          const [heartRate, setHeartRate] = useState('');
+          const [exercise, setExercise] = useState('');
+          const [sleepQuality, setSleepQuality] = useState('');
+          const [mood, setMood] = useState('');
+          const [pastIllness, setPastIllness] = useState('');
+          const [medication, setMedication] = useState('');
+          
+          const [bmiCalculated, setBmiCalculated] = useState(false);
+        
+          // State for UI messages, loading, and filtering
+          const [loading, setLoading] = useState(true);
+          const [message, setMessage] = useState('');
+          const [viewMode, setViewMode] = useState('community'); // 'community' or 'myrecords'
+          const [usernameFilter, setUsernameFilter] = useState('');
+          
+          // State for alert and educational messages
+          const [healthMessage, setHealthMessage] = useState('');
+        
+          // Constants for alert thresholds
+          const HIGH_BP_SYSTOLIC = 140;
+          const HIGH_BP_DIASTOLIC = 90;
+          const HIGH_BLOOD_SUGAR = 125; // mg/dL
+          const HIGH_BMI = 25;
+        
+          // Initialize Firebase and set up auth listener
+          useEffect(() => {
+            try {
+              const firebaseApp = initializeApp(firebaseConfig);
+              const firestore = getFirestore(firebaseApp);
+              const firebaseAuth = getAuth(firebaseApp);
+        
+              setDb(firestore);
+              setAuth(firebaseAuth);
+        
+              const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                  setUserId(user.uid);
+                  setMessage(`Signed in as user: ${user.uid}`);
+                } else {
+                  try {
+                    if (initialAuthToken) {
+                      const userCredential = await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                      setUserId(userCredential.user.uid);
+                      setMessage(`Signed in with custom token: ${userCredential.user.uid}`);
+                    } else {
+                      const userCredential = await signInAnonymously(firebaseAuth);
+                      setUserId(userCredential.user.uid);
+                      setMessage(`Signed in anonymously: ${userCredential.user.uid}`);
+                    }
+                  } catch (error) {
+                    console.error("Firebase auth error:", error);
+                    setMessage("Failed to sign in. Check console for details.");
+                  }
+                }
+                setLoading(false);
+              });
+        
+              return () => unsubscribe();
+            } catch (error) {
+              console.error("Firebase initialization error:", error);
+              setMessage("Failed to initialize Firebase. Check console for details.");
+              setLoading(false);
+            }
+          }, []);
+        
+          // Fetch data from a shared community Firestore collection using a snapshot listener
+          useEffect(() => {
+            if (!db || !userId) return;
+        
+            try {
+              const q = query(collection(db, `/artifacts/${appId}/public/data/communityHealthRecords`));
+              const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                const records = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Manually sort the records by timestamp in memory
+                records.sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0));
+                setHealthRecords(records);
+                // Get unique usernames for filtering
+                const usernames = [...new Set(records.map(r => r.username))];
+                setActiveUsernames(usernames);
+              }, (error) => {
+                console.error("Error fetching documents:", error);
+                setMessage("Error fetching data. Please try again.");
+              });
+        
+              return () => unsubscribe();
+            } catch (error) {
+              console.error("Firestore data fetch error:", error);
+            }
+          }, [db, userId]);
+        
+          // Filter records based on view mode and username filter
+          useEffect(() => {
+            let newFilteredRecords = healthRecords;
+        
+            if (viewMode === 'myrecords') {
+              newFilteredRecords = newFilteredRecords.filter(record => record.userId === userId);
+            }
+        
+            if (usernameFilter) {
+              newFilteredRecords = newFilteredRecords.filter(record => 
+                record.username?.toLowerCase().includes(usernameFilter.toLowerCase())
+              );
+            }
+        
+            setFilteredRecords(newFilteredRecords);
+        
+            // Update health message based on the latest filtered record
+            const latestRecord = newFilteredRecords[0];
+            if (latestRecord) {
+              if (latestRecord.systolic > HIGH_BP_SYSTOLIC || latestRecord.diastolic > HIGH_BP_DIASTOLIC) {
+                setHealthMessage("Your latest blood pressure reading is high. Remember to manage stress and consider talking to your doctor.");
+              } else if (latestRecord.bloodSugar > HIGH_BLOOD_SUGAR) {
+                setHealthMessage("Your latest blood sugar reading is high. A balanced diet and regular exercise can help.");
+              } else if (latestRecord.bmi > HIGH_BMI) {
+                setHealthMessage("Your BMI is high. Focus on a healthy diet and active lifestyle to stay on track.");
+              } else {
+                setHealthMessage("Great job! Your latest readings are within a healthy range.");
+              }
+            } else {
+              setHealthMessage("");
+            }
+        
+          }, [healthRecords, viewMode, userId, usernameFilter]);
+        
+          // Calculate BMI when weight and height are available
+          const calculateBMI = useCallback((w, h) => {
+            const weightInKg = parseFloat(w);
+            const heightInMeters = parseFloat(h);
+            if (!isNaN(weightInKg) && weightInKg > 0 && !isNaN(heightInMeters) && heightInMeters > 0) {
+              const newBmi = (weightInKg / (heightInMeters * heightInMeters)).toFixed(2);
+              setBmi(newBmi);
+              setBmiCalculated(true);
+            } else {
+              setBmi('');
+              setBmiCalculated(false);
+            }
+          }, []);
+        
+          // Update BMI when weight or height input changes
+          useEffect(() => {
+            calculateBMI(weight, height);
+          }, [weight, height, calculateBMI]);
+        
+          // Handle form submission
+          const handleAddRecord = async (e) => {
+            e.preventDefault();
+            if (!db || !userId) {
+              setMessage('Not authenticated. Please wait a moment.');
+              return;
+            }
+        
+            const newRecord = {
+              userId, // Associate the record with the current user's ID
+              username: username || 'Anonymous', // Use the username or 'Anonymous'
+              systolic: parseInt(systolic),
+              diastolic: parseInt(diastolic),
+              bloodSugar: parseInt(bloodSugar),
+              weight: parseFloat(weight),
+              height: parseFloat(height),
+              bmi: parseFloat(bmi),
+              heartRate: parseInt(heartRate),
+              exercise,
+              sleepQuality,
+              mood,
+              pastIllness,
+              medication,
+              timestamp: serverTimestamp(),
+            };
+        
+            try {
+              await addDoc(collection(db, `/artifacts/${appId}/public/data/communityHealthRecords`), newRecord);
+              setMessage('Health record added successfully!');
+              // Clear the form
+              setUsername('');
+              setSystolic('');
+              setDiastolic('');
+              setBloodSugar('');
+              setWeight('');
+              setHeight('');
+              setBmi('');
+              setHeartRate('');
+              setExercise('');
+              setSleepQuality('');
+              setMood('');
+              setPastIllness('');
+              setMedication('');
+              setBmiCalculated(false);
+            } catch (error) {
+              console.error('Error adding document:', error);
+              setMessage('Error adding record. Check console for details.');
+            }
+          };
+        
+          const handleDownload = () => {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(filteredRecords, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "community_health_records.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+          };
+        
+          const renderChart = (title, dataKey, maxVal, healthyMin, healthyMax, color) => {
+            if (filteredRecords.length === 0) {
+              return <p className="text-center text-gray-500">No data to display yet.</p>;
+            }
+        
+            const data = [...filteredRecords].reverse();
+            const svgWidth = 800;
+            const svgHeight = 200;
+            const padding = 40;
+            const chartWidth = svgWidth - 2 * padding;
+            const chartHeight = svgHeight - 2 * padding;
+        
+            const scaleX = (index) => padding + (index / (data.length - 1)) * chartWidth;
+            const scaleY = (value) => svgHeight - padding - (value / maxVal) * chartHeight;
+            const points = data.map((d, i) => `${scaleX(i)},${scaleY(d[dataKey] || 0)}`).join(' ');
+        
+            const healthyZoneY1 = scaleY(healthyMax);
+            const healthyZoneY2 = scaleY(healthyMin);
+        
+            return (
+              <div className="mb-8">
+                <h3 className="text-xl font-semibold mb-2">{title}</h3>
+                <svg className="w-full h-auto max-w-full" viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+                  {/* Healthy Zone */}
+                  {healthyMin !== undefined && healthyMax !== undefined && (
+                    <rect
+                      x={padding}
+                      y={healthyZoneY1}
+                      width={chartWidth}
+                      height={healthyZoneY2 - healthyZoneY1}
+                      fill={color}
+                      fillOpacity="0.1"
+                    />
+                  )}
+        
+                  {/* Axes */}
+                  <line x1={padding} y1={svgHeight - padding} x2={svgWidth - padding} y2={svgHeight - padding} stroke="#d1d5db" />
+                  <line x1={padding} y1={padding} x2={padding} y2={svgHeight - padding} stroke="#d1d5db" />
+        
+                  {/* Data Line */}
+                  <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
+                </svg>
+              </div>
+            );
+          };
+        
+          const renderCharts = () => {
+            if (filteredRecords.length === 0) return null;
+        
+            const maxSystolic = Math.max(...filteredRecords.map(d => d.systolic || 0), HIGH_BP_SYSTOLIC + 20);
+            const maxDiastolic = Math.max(...filteredRecords.map(d => d.diastolic || 0), HIGH_BP_DIASTOLIC + 20);
+            const maxBloodSugar = Math.max(...filteredRecords.map(d => d.bloodSugar || 0), HIGH_BLOOD_SUGAR + 20);
+            const maxWeight = Math.max(...filteredRecords.map(d => d.weight || 0), 100);
+            const maxBMI = Math.max(...filteredRecords.map(d => d.bmi || 0), HIGH_BMI + 10);
+            const maxHeartRate = Math.max(...filteredRecords.map(d => d.heartRate || 0), 100);
+        
+            return (
+              <>
+                {renderChart('Blood Pressure Systolic', 'systolic', maxSystolic, 90, 120, '#ef4444')}
+                {renderChart('Blood Pressure Diastolic', 'diastolic', maxDiastolic, 60, 80, '#6366f1')}
+                {renderChart('Blood Sugar', 'bloodSugar', maxBloodSugar, 70, 100, '#22c55e')}
+                {renderChart('Weight (kg)', 'weight', maxWeight, 0, 0, '#eab308')}
+                {renderChart('BMI', 'bmi', maxBMI, 18.5, HIGH_BMI, '#06b6d4')}
+                {renderChart('Heart Rate', 'heartRate', maxHeartRate, 60, 100, '#a855f7')}
+              </>
+            );
+          };
+        
+          return (
+            <div className="min-h-screen bg-gray-100 p-4 font-sans text-gray-800">
+              <header className="text-center mb-8">
+                <h1 className="text-4xl font-bold text-gray-900">Holistic Community Health Monitor</h1>
+                <p className="mt-2 text-gray-600">Track key health metrics, share with your community, and view trends.</p>
+                {userId && (
+                  <p className="mt-2 text-xs text-gray-400">
+                    User ID: <span className="font-mono">{userId}</span>
+                  </p>
+                )}
+              </header>
+        
+              {loading ? (
+                <div className="text-center text-lg text-gray-600">Loading...</div>
+              ) : (
+                <main className="container mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Input Form */}
+                  <section className="bg-white rounded-xl shadow-lg p-6 lg:col-span-1 h-fit">
+                    <h2 className="text-2xl font-semibold mb-4">Add New Record</h2>
+                    <form onSubmit={handleAddRecord} className="space-y-4">
+                      <div>
+                        <label htmlFor="username" className="block text-sm font-medium text-gray-700">Your Name / Username</label>
+                        <input
+                          type="text"
+                          id="username"
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                          placeholder="e.g., Jane Doe"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Blood Pressure (Systolic/Diastolic)</label>
+                        <div className="mt-1 flex space-x-2">
+                          <input
+                            type="number"
+                            value={systolic}
+                            onChange={(e) => setSystolic(e.target.value)}
+                            placeholder="Systolic (mmHg)"
+                            className="w-1/2 p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                          <input
+                            type="number"
+                            value={diastolic}
+                            onChange={(e) => setDiastolic(e.target.value)}
+                            placeholder="Diastolic (mmHg)"
+                            className="w-1/2 p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label htmlFor="bloodSugar" className="block text-sm font-medium text-gray-700">Blood Sugar (mg/dL)</label>
+                        <input
+                          type="number"
+                          id="bloodSugar"
+                          value={bloodSugar}
+                          onChange={(e) => setBloodSugar(e.target.value)}
+                          placeholder="Blood Sugar"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="weight" className="block text-sm font-medium text-gray-700">Weight (kg)</label>
+                        <input
+                          type="number"
+                          id="weight"
+                          value={weight}
+                          onChange={(e) => setWeight(e.target.value)}
+                          placeholder="Weight"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="height" className="block text-sm font-medium text-gray-700">Height (m)</label>
+                        <input
+                          type="number"
+                          id="height"
+                          value={height}
+                          onChange={(e) => setHeight(e.target.value)}
+                          placeholder="Height"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">BMI</label>
+                        <input
+                          type="text"
+                          value={bmi}
+                          disabled
+                          placeholder="BMI (auto-calculated)"
+                          className={`mt-1 block w-full p-2 border border-gray-300 rounded-md bg-gray-50 cursor-not-allowed ${bmiCalculated && parseFloat(bmi) > HIGH_BMI ? 'border-red-500' : ''}`}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="heartRate" className="block text-sm font-medium text-gray-700">Heart Rate (bpm)</label>
+                        <input
+                          type="number"
+                          id="heartRate"
+                          value={heartRate}
+                          onChange={(e) => setHeartRate(e.target.value)}
+                          placeholder="e.g., 75"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="exercise" className="block text-sm font-medium text-gray-700">Exercise</label>
+                        <input
+                          type="text"
+                          id="exercise"
+                          value={exercise}
+                          onChange={(e) => setExercise(e.target.value)}
+                          placeholder="e.g., 30 min walk"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="sleepQuality" className="block text-sm font-medium text-gray-700">Sleep Quality</label>
+                        <input
+                          type="text"
+                          id="sleepQuality"
+                          value={sleepQuality}
+                          onChange={(e) => setSleepQuality(e.target.value)}
+                          placeholder="e.g., 7 hours, Restful"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="mood" className="block text-sm font-medium text-gray-700">Mood</label>
+                        <input
+                          type="text"
+                          id="mood"
+                          value={mood}
+                          onChange={(e) => setMood(e.target.value)}
+                          placeholder="e.g., Energetic, Calm"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="pastIllness" className="block text-sm font-medium text-gray-700">Past/Chronic Illness</label>
+                        <textarea
+                          id="pastIllness"
+                          value={pastIllness}
+                          onChange={(e) => setPastIllness(e.target.value)}
+                          rows="2"
+                          placeholder="e.g., Hypertension, Diabetes"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        ></textarea>
+                      </div>
+                      <div>
+                        <label htmlFor="medication" className="block text-sm font-medium text-gray-700">Current Medication</label>
+                        <textarea
+                          id="medication"
+                          value={medication}
+                          onChange={(e) => setMedication(e.target.value)}
+                          rows="2"
+                          placeholder="e.g., Lisinopril (20mg), Metformin (500mg)"
+                          className="mt-1 block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        ></textarea>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-indigo-600 text-white p-3 rounded-md font-bold hover:bg-indigo-700 transition-colors"
+                      >
+                        Add Record
+                      </button>
+                    </form>
+                    {message && <p className="mt-4 text-center text-sm text-gray-600">{message}</p>}
+                  </section>
+        
+                  {/* Records and Graphs */}
+                  <section className="lg:col-span-2 space-y-8">
+                    {/* Charts Section */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                      <h2 className="text-2xl font-semibold mb-4">Health Trends</h2>
+                      {renderCharts()}
+                    </div>
+        
+                    {/* Records List Section */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                      <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-2xl font-semibold">
+                          {viewMode === 'community' ? 'Community Records' : 'My Records'}
+                        </h2>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => setViewMode(viewMode === 'community' ? 'myrecords' : 'community')}
+                            className="bg-indigo-600 text-white py-2 px-4 rounded-md font-medium hover:bg-indigo-700 transition-colors"
+                          >
+                            {viewMode === 'community' ? 'Show My Records' : 'Show All Records'}
+                          </button>
+                          <button
+                            onClick={handleDownload}
+                            className="bg-gray-200 text-gray-800 py-2 px-4 rounded-md font-medium hover:bg-gray-300 transition-colors"
+                          >
+                            Download Data
+                          </button>
+                        </div>
+                      </div>
+                      {healthMessage && (
+                        <div className="p-4 mb-4 rounded-md bg-green-100 text-green-700">
+                          <p className="font-semibold">{healthMessage}</p>
+                        </div>
+                      )}
+                      <div className="mb-4">
+                        <label htmlFor="username-filter" className="sr-only">Filter by Username</label>
+                        <input
+                          type="text"
+                          id="username-filter"
+                          value={usernameFilter}
+                          onChange={(e) => setUsernameFilter(e.target.value)}
+                          placeholder="Filter by username..."
+                          className="block w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div className="space-y-4">
+                        {filteredRecords.length === 0 ? (
+                          <p className="text-center text-gray-500">No records found. Add your first record above!</p>
+                        ) : (
+                          filteredRecords.map((record) => (
+                            <div
+                              key={record.id}
+                              className={`p-4 rounded-md border ${
+                                (record.systolic > HIGH_BP_SYSTOLIC || record.diastolic > HIGH_BP_DIASTOLIC || record.bloodSugar > HIGH_BLOOD_SUGAR || record.bmi > HIGH_BMI)
+                                ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'
+                              } hover:shadow-md transition-shadow`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div className="text-sm">
+                                  <p className="text-gray-900 font-bold">
+                                    {record.username} on {record.timestamp ? new Date(record.timestamp.toDate()).toLocaleString() : 'Loading...'}
+                                  </p>
+                                  <p className="mt-1">
+                                    <span className="font-medium">Blood Pressure:</span> {record.systolic}/{record.diastolic} mmHg
+                                    { (record.systolic > HIGH_BP_SYSTOLIC || record.diastolic > HIGH_BP_DIASTOLIC) && (
+                                        <span className="ml-2 text-red-600 font-bold">⚠️ High Reading</span>
+                                      )}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium">Blood Sugar:</span> {record.bloodSugar} mg/dL
+                                    { record.bloodSugar > HIGH_BLOOD_SUGAR && (
+                                        <span className="ml-2 text-red-600 font-bold">⚠️ High Reading</span>
+                                      )}
+                                  </p>
+                                  <p>
+                                    <span className="font-medium">Weight:</span> {record.weight} kg
+                                    <span className="ml-4 font-medium">Height:</span> {record.height} m
+                                  </p>
+                                  <p>
+                                    <span className="font-medium">BMI:</span> {record.bmi}
+                                    { record.bmi > HIGH_BMI && (
+                                        <span className="ml-2 text-red-600 font-bold">⚠️ High Reading</span>
+                                      )}
+                                  </p>
+                                  {record.heartRate && <p><span className="font-medium">Heart Rate:</span> {record.heartRate} bpm</p>}
+                                  {record.exercise && <p><span className="font-medium">Exercise:</span> {record.exercise}</p>}
+                                  {record.sleepQuality && <p><span className="font-medium">Sleep:</span> {record.sleepQuality}</p>}
+                                  {record.mood && <p><span className="font-medium">Mood:</span> {record.mood}</p>}
+                                </div>
+                                <div className="text-right text-xs text-gray-500">
+                                  {record.pastIllness && <p>Illness: {record.pastIllness}</p>}
+                                  {record.medication && <p>Medication: {record.medication}</p>}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                </main>
+              )}
+            </div>
+          );
+        }
+        
+        ReactDOM.render(<App />, document.getElementById('root'));
+        
+        // Register the service worker for PWA functionality
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./service-worker.js').then(registration => {
+              console.log('SW registered: ', registration);
+            }).catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+          });
+        }
+    </script>
+
+</body>
+</html>
