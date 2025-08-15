@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PWA Icon Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white rounded-xl shadow-lg p-8 max-w-lg w-full text-center">
+        <h1 class="text-3xl font-bold mb-4">PWA Icon Generator</h1>
+        <p class="text-gray-600 mb-6">
+            Use this tool to generate the required icons for your Progressive Web App.
+            These icons are referenced in the `manifest.json` file and are required for the app to be added to a mobile home screen.
+        </p>
+
+        <div class="space-y-6">
+            <div class="p-4 border border-gray-200 rounded-lg">
+                <div class="flex flex-col items-center mb-4">
+                    <canvas id="canvas192" width="192" height="192" class="border border-gray-300 rounded-md"></canvas>
+                    <p class="mt-2 font-semibold">192x192 px Icon</p>
+                </div>
+                <button id="download192" class="w-full bg-blue-600 text-white p-3 rounded-md font-bold hover:bg-blue-700 transition-colors">
+                    Download android-chrome-192x192.png
+                </button>
+            </div>
+
+            <div class="p-4 border border-gray-200 rounded-lg">
+                <div class="flex flex-col items-center mb-4">
+                    <canvas id="canvas512" width="512" height="512" class="border border-gray-300 rounded-md"></canvas>
+                    <p class="mt-2 font-semibold">512x512 px Icon</p>
+                </div>
+                <button id="download512" class="w-full bg-blue-600 text-white p-3 rounded-md font-bold hover:bg-blue-700 transition-colors">
+                    Download android-chrome-512x512.png
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function createAndDownloadIcon(canvasId, downloadId, size, text) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#4f46e5'; // Indigo color
+            ctx.fillRect(0, 0, size, size);
+
+            ctx.fillStyle = '#ffffff'; // White color
+            ctx.font = `${size * 0.4}px Inter, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, size / 2, size / 2);
+
+            const downloadBtn = document.getElementById(downloadId);
+            downloadBtn.addEventListener('click', () => {
+                const link = document.createElement('a');
+                link.download = `${downloadId.replace('download', '')}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            createAndDownloadIcon('canvas192', 'download192', 192, 'HM');
+            createAndDownloadIcon('canvas512', 'download512', 512, 'HM');
+        });
+    </script>
+</body>
+</html>
